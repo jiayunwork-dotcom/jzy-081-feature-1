@@ -21,6 +21,24 @@ export const SAMPLE_TABLES = [
       term3: 0.28736,
       pureEndowment3: 0.27648,
       endowment3: 0.56384,
+      // 均衡年缴净保费（全期缴费，单位保额）：
+      //   终身 P_x   = A_x / ä_x = 0.4864256 / 2.567872
+      //   两全 P_{x:3} = A_{x:3} / ä_{x:3}，ä_{x:3} = 1 + 0.9·0.8 + 0.72·0.64 = 2.1808
+      premiumWholeLife: 0.18942751,
+      temporaryAnnuity3: 2.1808,
+      premiumEndowment3: 0.25854732,
+      // 逐年净准备金（单位保额，列下标即第 t 个保单年度末，t=0 为签单时刻）：
+      //   两全满期（t=3）前一刻准备金恰为保额 1
+      reservesEndowment3: [0, 0.24798239, 0.54145268, 1],
+      //   终身险到终龄后（t=5）无存续保单，准备金收敛回 0
+      reservesWholeLife: [
+        0,
+        0.15198265,
+        0.28345338,
+        0.45480149,
+        0.61057249,
+        0,
+      ],
     },
   },
   {
@@ -38,6 +56,11 @@ export const SAMPLE_TABLES = [
       term3: 0, // 零死亡率段内没有死亡给付
       pureEndowment3: 0.512, // 退化为纯贴现 v^3 = 0.8^3
       endowment3: 0.512,
+      // 零死亡段两全：保费年金 ä_{x:3} = 1 + 0.8 + 0.64 = 2.44，
+      // P = 0.512 / 2.44；准备金即保费按 v=0.8 纯贴现/利息滚动的结果
+      temporaryAnnuity3: 2.44,
+      premiumEndowment3: 0.20983607,
+      reservesEndowment3: [0, 0.26229508, 0.59016393, 1],
     },
   },
 ];

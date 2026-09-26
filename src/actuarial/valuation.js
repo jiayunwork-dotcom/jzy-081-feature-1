@@ -11,6 +11,13 @@ import {
   pureEndowmentAPV,
   termInsuranceAPV,
 } from './endowment.js';
+import { wholeLifeNetPremium, endowmentNetPremium } from './premium.js';
+import {
+  prospectiveReservePerUnit,
+  retrospectiveReservePerUnit,
+  recurrenceSteps,
+  withinTolerance,
+} from './reserve.js';
 
 const EPS = 1e-12;
 
@@ -88,5 +95,162 @@ export function valueEndowment({ qx, interestRate, years, sumInsured }) {
       Math.abs(1 - (wholeLifeInsurance + d * annuityDue)) < EPS,
     discountFactor: discountFactor(interestRate),
     discountRate: d,
+  };
+}
+
+/**
+ * 一张按年缴费保单的公共口径：保障/缴费年限、均衡净保费（单位 + 金额）。
+ * 缴费期 = 保障期（全期缴费）：终身险缴到终龄（表长），两全缴到保障年限满。
+ *
+ * @param {{ qx: number[], interestRate: number, productType: string,
+ *           years?: number, sumInsured: number }} input
+ * @returns {object}
+ */
+export function valuePremium({ qx, interestRate, productType, years, sumInsured }) {
+  const survival = survivalProbabilities(qx);
+  const termYears = productType === 'endowment' ? years : qx.length;
+
+  const premium = productType === 'endowment'
+    ? endowmentNetPremium(survival, interestRate, years)
+    : wholeLifeNetPremium(survival, interestRate);
+  const { benefitAPV, annuityAPV, premiumPerUnit } = premium;
+
+  // 等价原则残差：P·ä − 给付现值（单位口径下应恰为 0）
+  const equivalenceResidual = premiumPerUnit * annuityAPV - benefitAPV;
+
+  return {
+    productType,
+    years: termYears,
+    premiumYears: termYears,
+    sumInsured,
+    perUnit: {
+      benefitAPV,
+      annuityAPV,
+      netPremium: premiumPerUnit,
+    },
+    money: {
+      benefitAPV: benefitAPV * sumInsured,
+      annuityAPV: annuityAPV * sumInsured,
+      netPremium: premiumPerUnit * sumInsured,
+    },
+    // 等价原则基准：P · 保费年金现值 = 给付现值
+    equivalenceResidual,
+    equivalenceClosed: withinTolerance(equivalenceResidual, 0, benefitAPV),
+    discountFactor: discountFactor(interestRate),
+    discountRate: discountRate(interestRate),
+  };
+}
+
+/**
+ * 一张按年缴费保单的完整核算：均衡净保费 + 逐年净准备金（往后看 / 回算两条路径）
+ * + 逐年递推校验 + 签单/满期闭合检查。
+ *
+ * @param {{ startAge: number, qx: number[], interestRate: number,
+ *           productType: string, years?: number, sumInsured: number }} input
+ * @returns {object}
+ */
+export function valuePolicy(input) {
+  const { startAge, qx, interestRate, productType, sumInsured } = input;
+  const base = valuePremium(input);
+  const survival = survivalProbabilities(qx); // 回算口径始终从签单起点起算
+  const termYears = base.years;
+  const premiumPerUnit = base.perUnit.netPremium;
+  const premiumAnnual = base.money.netPremium;
+
+  const reserves = [];
+  for (let t = 0; t <= termYears; t++) {
+    const proUnit = prospectiveReservePerUnit({
+      qx,
+      interestRate,
+      productType,
+      termYears,
+      premiumPerUnit,
+      t,
+    });
+    const retroUnit = retrospectiveReservePerUnit({
+      survival,
+      interestRate,
+      premiumPerUnit,
+      t,
+    });
+    const prospective = proUnit * sumInsured;
+    const retrospective = retroUnit === null ? null : retroUnit * sumInsured;
+    reserves.push({
+      t,
+      age: startAge + t,
+      prospective,
+      retrospective,
+      // 两条路径的差：仅数值误差量级；回算无定义的年为 null
+      pathDifference: retrospective === null ? null : prospective - retrospective,
+    });
+  }
+
+  const recurrence = recurrenceSteps({
+    qx,
+    interestRate,
+    reservesMoney: reserves.map((r) => r.prospective),
+    premiumAnnual,
+    sumInsured,
+  });
+
+  // 回算有定义的年里，两条路径的最大差异
+  const pathDifferences = reserves
+    .map((r) => r.pathDifference)
+    .filter((d) => d !== null)
+    .map((d) => Math.abs(d));
+  const maxPathDifference = pathDifferences.length
+    ? Math.max(...pathDifferences)
+    : 0;
+
+  const issueReserve = reserves[0].prospective;
+  const terminalReserve = reserves[reserves.length - 1];
+
+  return {
+    ...base,
+    reserves,
+    recurrence: {
+      formula:
+        '(_t V + P)(1+i) = q_{x+t}*S + p_{x+t}*_(t+1)V',
+      steps: recurrence,
+      maxAbsResidual: Math.max(
+        ...recurrence.map((s) => Math.abs(s.residual)),
+      ),
+      closed: recurrence.every((s) => s.closed),
+    },
+    checks: {
+      // 签单时点准备金为 0（等价原则）
+      reserveAtIssue: {
+        value: issueReserve,
+        residual: issueReserve,
+        closed: withinTolerance(issueReserve, 0, sumInsured),
+      },
+      // 两全满期、生存金给付前一刻准备金 = 保额；终身险此项为 null
+      maturityReserve: productType === 'endowment'
+        ? {
+            value: terminalReserve.prospective,
+            sumInsured,
+            residual: terminalReserve.prospective - sumInsured,
+            closed: withinTolerance(
+              terminalReserve.prospective,
+              sumInsured,
+              sumInsured,
+            ),
+          }
+        : null,
+      // 终身险到期末收敛：终龄后无存续保单，准备金为 0
+      terminalReserveZero: productType === 'endowment'
+        ? null
+        : {
+            value: terminalReserve.prospective,
+            residual: terminalReserve.prospective,
+            closed: withinTolerance(terminalReserve.prospective, 0, sumInsured),
+          },
+      // 往后看与回算两条路径逐年对得上
+      pathsAgree: {
+        maxAbsDifference: maxPathDifference,
+        closed: withinTolerance(maxPathDifference, 0, sumInsured),
+      },
+      recurrenceClosed: recurrence.every((s) => s.closed),
+    },
   };
 }

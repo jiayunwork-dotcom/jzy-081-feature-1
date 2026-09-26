@@ -26,3 +26,29 @@ export function annuityDueAPV(survival, i) {
 
   return apv;
 }
+
+/**
+ * n 年定期期初生存年金精算现值（temporary annuity-due）：
+ *   ä_{x:n} = Σ_{k=0}^{n-1}  v^k * _k p_x
+ *
+ * 只覆盖前 n 个年初（共 n 笔给付），正是「每年年初缴一笔、缴到第 n 期为止」
+ * 的保费收入现值口径（乘上保费即为保费现值）。n = 0 时没有缴费期，现值为 0。
+ *
+ * @param {{ kp: number[] }} survival survival 模块的逐年递推结果
+ * @param {number} i 年利率
+ * @param {number} n 缴费/给付期数（整数，0 <= n <= 表长，由校验层保证）
+ * @returns {number} 单位给付下的 n 年期初生存年金精算现值
+ */
+export function temporaryAnnuityDueAPV(survival, i, n) {
+  const v = discountFactor(i);
+  let vk = 1; // v^0
+  let apv = 0;
+  const { kp } = survival;
+
+  for (let k = 0; k < n; k++) {
+    apv += vk * kp[k];
+    vk *= v;
+  }
+
+  return apv;
+}

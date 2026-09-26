@@ -4,8 +4,14 @@
 import {
   validateLifeTableInput,
   validateEndowmentInput,
+  validatePolicyInput,
 } from '../validation/validate.js';
-import { valueLifeTable, valueEndowment } from '../actuarial/valuation.js';
+import {
+  valueLifeTable,
+  valueEndowment,
+  valuePremium,
+  valuePolicy,
+} from '../actuarial/valuation.js';
 import { SAMPLE_TABLES, getSampleTable } from '../data/sampleTable.js';
 
 export default async function registerRoutes(app) {
@@ -80,6 +86,73 @@ export default async function registerRoutes(app) {
         residual: result.identityResidual,
         closed: result.identityClosed,
       },
+    };
+  });
+
+  // 口子三：均衡年缴净保费（等价原则反解）
+  app.post('/api/v1/premium', async (request, reply) => {
+    const input = validatePolicyInput(request.body);
+    const result = valuePremium(input);
+
+    reply.code(200);
+    return {
+      startAge: input.startAge,
+      terminalAge: input.startAge + input.qx.length - 1,
+      interestRate: input.interestRate,
+      discountFactor: result.discountFactor,
+      discountRate: result.discountRate,
+      productType: result.productType,
+      years: result.years,
+      premiumYears: result.premiumYears,
+      sumInsured: result.sumInsured,
+      premium: {
+        perUnit: result.perUnit.netPremium,
+        annual: result.money.netPremium,
+        benefitAPVPerUnit: result.perUnit.benefitAPV,
+        annuityAPVPerUnit: result.perUnit.annuityAPV,
+        benefitAPV: result.money.benefitAPV,
+        annuityAPV: result.money.annuityAPV,
+      },
+      equivalence: {
+        formula: 'P * annuityDueAPV = benefitAPV (equivalence principle)',
+        residual: result.equivalenceResidual,
+        closed: result.equivalenceClosed,
+      },
+    };
+  });
+
+  // 口子四：逐年净准备金（往后看 / 回算两路径）+ 逐年递推关系 + 闭合校验
+  app.post('/api/v1/reserves', async (request, reply) => {
+    const input = validatePolicyInput(request.body);
+    const result = valuePolicy(input);
+
+    reply.code(200);
+    return {
+      startAge: input.startAge,
+      terminalAge: input.startAge + input.qx.length - 1,
+      interestRate: input.interestRate,
+      discountFactor: result.discountFactor,
+      discountRate: result.discountRate,
+      productType: result.productType,
+      years: result.years,
+      premiumYears: result.premiumYears,
+      sumInsured: result.sumInsured,
+      premium: {
+        perUnit: result.perUnit.netPremium,
+        annual: result.money.netPremium,
+        benefitAPVPerUnit: result.perUnit.benefitAPV,
+        annuityAPVPerUnit: result.perUnit.annuityAPV,
+        benefitAPV: result.money.benefitAPV,
+        annuityAPV: result.money.annuityAPV,
+      },
+      equivalence: {
+        formula: 'P * annuityDueAPV = benefitAPV (equivalence principle)',
+        residual: result.equivalenceResidual,
+        closed: result.equivalenceClosed,
+      },
+      reserves: result.reserves,
+      recurrence: result.recurrence,
+      checks: result.checks,
     };
   });
 }

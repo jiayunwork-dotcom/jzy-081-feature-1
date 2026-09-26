@@ -12,6 +12,9 @@ import { ValidationError } from '../errors.js';
 export const MIN_AGE = 0;
 export const MAX_AGE = 120; // 终龄封顶：qx 最后一项对应年龄不得超过 120
 
+// 按年缴费保单的产品形态：终身寿险 / 两全
+export const PRODUCT_TYPES = ['whole-life', 'endowment'];
+
 const issue = (field, code, detail) => ({ field, code, detail });
 
 const isFiniteNumber = (v) =>
@@ -150,6 +153,50 @@ export function validateYears(years, tableLength) {
   return null;
 }
 
+/**
+ * 校验产品形态：只接受 whole-life（终身寿险）/ endowment（两全）。
+ */
+export function validateProductType(productType) {
+  if (typeof productType !== 'string' || !PRODUCT_TYPES.includes(productType)) {
+    return issue(
+      'productType',
+      'INVALID_PRODUCT_TYPE',
+      `产品形态必须是 ${PRODUCT_TYPES.join(' / ')}，收到 ${String(productType)}`,
+    );
+  }
+  return null;
+}
+
+/**
+ * 校验按年缴费保单的保障年限（= 缴费期数）：
+ *   1 <= n <= 表长 的整数。
+ * 与趸缴口径不同：一张要按年收保费的保单，0 年期没有意义（立刻满期、
+ * 无缴费期、保费年金为 0 无法反解），必须在计算前挡下。
+ */
+export function validatePolicyYears(years, tableLength) {
+  if (!isFiniteNumber(years) || !Number.isInteger(years)) {
+    return issue('years', 'INVALID_YEARS', '保障年限必须是整数年');
+  }
+  if (years < 0) {
+    return issue('years', 'NEGATIVE_YEARS', `保障年限不得为负，收到 ${years}`);
+  }
+  if (years === 0) {
+    return issue(
+      'years',
+      'NON_POSITIVE_YEARS',
+      '按年缴费保单的保障年限至少为 1 年，收到 0（不存在 0 年期两全保单）',
+    );
+  }
+  if (years > tableLength) {
+    return issue(
+      'years',
+      'YEARS_EXCEED_TABLE',
+      `保障年限 ${years} 超过生命表可覆盖年数 ${tableLength}`,
+    );
+  }
+  return null;
+}
+
 function reject(issues) {
   if (issues.length > 0) {
     throw new ValidationError('请求参数校验失败，未执行任何精算计算', issues);
@@ -213,6 +260,61 @@ export function validateEndowmentInput(body = {}) {
     qx: mortalityRates,
     interestRate,
     years,
+    sumInsured,
+  };
+}
+
+/**
+ * 校验「按年缴费保单（均衡净保费 / 逐年准备金）」接口的完整入参，
+ * 返回清洗后的入参。保障/缴费年限只对两全必填：
+ *   - endowment：years 必须是 1..表长 的整数
+ *   - whole-life：忽略调用方传入的 years，保障与缴费都到终龄（表长）
+ */
+export function validatePolicyInput(body = {}) {
+  const {
+    startAge,
+    mortalityRates,
+    interestRate,
+    productType,
+    years,
+    sumInsured,
+  } = body;
+  const issues = [];
+
+  const ageIssue = validateStartAge(startAge);
+  if (ageIssue) issues.push(ageIssue);
+
+  const safeAge = isFiniteNumber(startAge) && Number.isInteger(startAge)
+    ? startAge
+    : 0;
+  issues.push(...validateMortalityTable(mortalityRates, safeAge));
+
+  const rateIssue = validateInterestRate(interestRate);
+  if (rateIssue) issues.push(rateIssue);
+
+  const amountIssue = validateSumInsured(sumInsured);
+  if (amountIssue) issues.push(amountIssue);
+
+  const productIssue = validateProductType(productType);
+  if (productIssue) issues.push(productIssue);
+
+  // 年限只对两全有意义；表非法或产品形态非法时无法对照，避免追加误导性错误
+  if (
+    productType === 'endowment'
+    && Array.isArray(mortalityRates)
+    && mortalityRates.length > 0
+  ) {
+    const yearsIssue = validatePolicyYears(years, mortalityRates.length);
+    if (yearsIssue) issues.push(yearsIssue);
+  }
+
+  reject(issues);
+  return {
+    startAge,
+    qx: mortalityRates,
+    interestRate,
+    productType,
+    years: productType === 'endowment' ? years : mortalityRates.length,
     sumInsured,
   };
 }
