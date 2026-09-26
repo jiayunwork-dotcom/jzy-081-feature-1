@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import {
   validateLifeTableInput,
   validateEndowmentInput,
+  validatePolicyInput,
 } from '../src/validation/validate.js';
 import { ValidationError } from '../src/errors.js';
 
@@ -118,5 +119,75 @@ test('多个问题一次性收集到多条 issue', () => {
     assert.ok(fields.has('interestRate'));
     assert.ok(fields.has('years'));
     assert.ok(fields.has('sumInsured'));
+  }
+});
+
+// ---- 保单核算接口（productType / years / sumInsured）----
+
+const goodPolicy = {
+  startAge: 40,
+  mortalityRates: [0.1, 0.2, 0.25, 0.5, 1],
+  interestRate: 0.05,
+  sumInsured: 100000,
+  productType: 'endowment',
+  years: 3,
+};
+
+test('保单接口：合法入参通过并清洗出 product 结构', () => {
+  const en = validatePolicyInput(goodPolicy);
+  assert.deepEqual(en.product, { type: 'endowment', years: 3 });
+  const wl = validatePolicyInput({ ...goodPolicy, productType: 'wholeLife', years: undefined });
+  assert.deepEqual(wl.product, { type: 'wholeLife' });
+});
+
+test('保单接口：产品形态非法或缺失被挡', () => {
+  expectValidation(() => validatePolicyInput({ ...goodPolicy, productType: 'term' }));
+  expectValidation(() => validatePolicyInput({ ...goodPolicy, productType: undefined }));
+  expectValidation(() => validatePolicyInput({ ...goodPolicy, productType: 3 }));
+});
+
+test('保单接口：两全年限缺失 / 为 0 / 为负 / 非整数 / 超表长被挡', () => {
+  const mk = (years) => () => validatePolicyInput({ ...goodPolicy, years });
+  expectValidation(mk(undefined));
+  expectValidation(mk(0)); // 趸缴口径允许 n=0，年缴保费口径不允许
+  expectValidation(mk(-2));
+  expectValidation(mk(2.5));
+  expectValidation(mk(99));
+  assert.doesNotThrow(mk(1));
+  assert.doesNotThrow(mk(goodPolicy.mortalityRates.length)); // 满表长合法
+});
+
+test('保单接口：终身险不强制年限（多给的 years 被忽略）', () => {
+  assert.doesNotThrow(() => validatePolicyInput({
+    ...goodPolicy, productType: 'wholeLife', years: undefined,
+  }));
+  const r = validatePolicyInput({ ...goodPolicy, productType: 'wholeLife', years: 2 });
+  assert.deepEqual(r.product, { type: 'wholeLife' });
+});
+
+test('保单接口：沿用趸缴口径的全部基础校验（年龄/死亡率/利率/保额）', () => {
+  expectValidation(() => validatePolicyInput({ ...goodPolicy, startAge: 130 }));
+  expectValidation(() => validatePolicyInput({ ...goodPolicy, mortalityRates: [0.5, 0.9] }));
+  expectValidation(() => validatePolicyInput({ ...goodPolicy, interestRate: -1 }));
+  expectValidation(() => validatePolicyInput({ ...goodPolicy, sumInsured: 0 }));
+  expectValidation(() => validatePolicyInput({ ...goodPolicy, sumInsured: -5 }));
+});
+
+test('保单接口：多个问题一次性收集（含 productType 与 years）', () => {
+  try {
+    validatePolicyInput({
+      startAge: 40,
+      mortalityRates: [0.1, 0.2, 0.25, 0.5, 1],
+      interestRate: 0.05,
+      sumInsured: -1,
+      productType: 'endowment',
+      years: 0,
+    });
+    assert.fail('应当抛出 ValidationError');
+  } catch (err) {
+    assert.ok(err instanceof ValidationError);
+    const fields = new Set(err.issues.map((x) => x.field));
+    assert.ok(fields.has('sumInsured'));
+    assert.ok(fields.has('years'));
   }
 });

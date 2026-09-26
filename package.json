@@ -1,7 +1,7 @@
 {
   "name": "life-table-apv-service",
-  "version": "1.0.0",
-  "description": "离散生命表寿险精算现值（APV）常驻计算服务：终身寿险 / 期初生存年金 / 定期与两全净保费",
+  "version": "1.1.0",
+  "description": "离散生命表寿险精算常驻计算服务：趸缴现值（终身寿险/期初年金/两全）+ 年缴保单核算（均衡净保费、逐年净准备金、递推校验）",
   "type": "module",
   "main": "src/server.js",
   "engines": {

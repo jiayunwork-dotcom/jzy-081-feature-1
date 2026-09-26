@@ -4,8 +4,10 @@
 import {
   validateLifeTableInput,
   validateEndowmentInput,
+  validatePolicyInput,
 } from '../validation/validate.js';
 import { valueLifeTable, valueEndowment } from '../actuarial/valuation.js';
+import { valuePolicy } from '../actuarial/policy.js';
 import { SAMPLE_TABLES, getSampleTable } from '../data/sampleTable.js';
 
 export default async function registerRoutes(app) {
@@ -80,6 +82,35 @@ export default async function registerRoutes(app) {
         residual: result.identityResidual,
         closed: result.identityClosed,
       },
+    };
+  });
+
+  // 口子三：按年缴费保单 —— 均衡净保费 + 逐年净准备金序列 + 递推关系校验
+  app.post('/api/v1/policy', async (request, reply) => {
+    const input = validatePolicyInput(request.body);
+    const result = valuePolicy(input);
+
+    reply.code(200);
+    return {
+      startAge: input.startAge,
+      terminalAge: input.startAge + input.qx.length - 1,
+      interestRate: input.interestRate,
+      discountFactor: result.discountFactor,
+      discountRate: result.discountRate,
+      product: result.product,
+      sumInsured: result.sumInsured,
+      netPremium: result.netPremium,
+      initialReserve: result.initialReserve,
+      reserves: result.reserves.map((r) => ({
+        year: r.year,
+        attainedAge: input.startAge + r.year,
+        prospective: r.prospective,
+        retrospective: r.retrospective,
+        retrospectiveBoundaryFilled: r.retrospectiveBoundaryFilled,
+        recursionResidual: r.recursionResidual,
+        perUnit: r.perUnit,
+      })),
+      checks: result.checks,
     };
   });
 }

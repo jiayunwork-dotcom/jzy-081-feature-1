@@ -21,6 +21,13 @@ export const SAMPLE_TABLES = [
       term3: 0.28736,
       pureEndowment3: 0.27648,
       endowment3: 0.56384,
+      // 均衡年缴净保费与逐年净准备金（单位保额）：
+      //   终身：P = 0.4864256 / 2.567872；两全 n=3：P = 0.56384 / 2.1808
+      annuityDue3: 2.1808,
+      wholeLifeLevelPremium: 0.1894275,
+      wholeLifeReserves: [0.1519827, 0.2834534, 0.4548015, 0.6105725, 0],
+      endowment3LevelPremium: 0.2585473,
+      endowment3Reserves: [0.2479824, 0.5414527, 1],
     },
   },
   {
@@ -38,6 +45,10 @@ export const SAMPLE_TABLES = [
       term3: 0, // 零死亡率段内没有死亡给付
       pureEndowment3: 0.512, // 退化为纯贴现 v^3 = 0.8^3
       endowment3: 0.512,
+      // 两全 n=3：P = 0.512 / 2.44；准备金逐年爬到满期的 1
+      annuityDue3: 2.44,
+      endowment3LevelPremium: 0.2098361,
+      endowment3Reserves: [0.2622951, 0.5901639, 1],
     },
   },
 ];
